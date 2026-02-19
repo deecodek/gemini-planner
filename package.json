@@ -1,0 +1,29 @@
+{
+  "name": "flowcode",
+  "version": "1.0.0",
+  "description": "A CLI AI planner that helps you shape your software idea and generates structured markdown files",
+  "main": "src/cli/flowcode.js",
+  "bin": {
+    "flowcode": "./src/cli/flowcode.js"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli/flowcode.js",
+    "dev": "node src/cli/flowcode.js"
+  },
+  "keywords": [
+    "ai",
+    "planner",
+    "gemini",
+    "code-generation",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  }
+}
