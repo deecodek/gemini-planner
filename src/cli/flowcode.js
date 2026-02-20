@@ -65,7 +65,7 @@ function ensureConfigExists() {
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       geminiApiKey: '',
-      planFolderName: 'plan'
+      planFolderName: 'build-markdown'
     }, null, 2));
   }
 }
