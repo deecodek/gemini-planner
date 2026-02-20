@@ -26,8 +26,9 @@ YOUR GOAL:
 Guide the user through shaping their idea into a clear, actionable plan. Once you have enough information, generate a structured JSON plan.
 
 PLAN JSON FORMAT:
-When ready, output ONLY a valid JSON object with this exact structure (no markdown, no explanation):
+When ready, output the JSON wrapped in markdown code blocks like this:
 
+\`\`\`md
 {
   "projectName": "string",
   "planVersion": 1,
@@ -45,9 +46,10 @@ When ready, output ONLY a valid JSON object with this exact structure (no markdo
     "ERRORS": "markdown content for Error Handling"
   }
 }
+\`\`\`
 
 IMPORTANT RULES:
-- Never output the raw JSON to the chat - say "I'll generate the plan now" and then output the JSON
+- Always wrap the JSON in \`\`\`md code blocks (NOT \`\`\`json)
 - After generating the plan, tell the user the plan is ready
 - Keep responses concise and conversational
 `;
@@ -219,6 +221,56 @@ async function chatWithGemini(messages, apiKey) {
 }
 
 function extractPlanJson(response) {
+  // Look for the pattern ```md followed by { and ending with } followed by ```
+  // We need to find the FIRST ```md that contains JSON (starts with {)
+  const lines = response.split('\n');
+  let jsonContent = '';
+  let inJsonBlock = false;
+  let braceCount = 0;
+  let started = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Look for ```md or ```json start
+    if (!inJsonBlock && (line.trim().startsWith('```md') || line.trim().startsWith('```json'))) {
+      inJsonBlock = true;
+      started = false;
+      braceCount = 0;
+      jsonContent = '';
+      continue;
+    }
+    
+    if (inJsonBlock) {
+      // Check for end of code block
+      if (line.trim() === '```' && started && braceCount === 0) {
+        break;
+      }
+      
+      // Track when we hit the opening brace
+      if (!started && line.trim().startsWith('{')) {
+        started = true;
+      }
+      
+      if (started) {
+        jsonContent += line + '\n';
+        // Count braces to handle nested objects
+        braceCount += (line.match(/\{/g) || []).length;
+        braceCount -= (line.match(/\}/g) || []).length;
+      }
+    }
+  }
+  
+  if (jsonContent.trim()) {
+    try {
+      return JSON.parse(jsonContent);
+    } catch (e) {
+      console.log('[DEBUG] Failed to parse JSON:', e.message);
+      return null;
+    }
+  }
+  
+  // Fallback: try raw JSON extraction
   const jsonMatch = response.match(/\{[\s\S]*"files"[\s\S]*\}/);
   if (jsonMatch) {
     try {
@@ -227,6 +279,7 @@ function extractPlanJson(response) {
       return null;
     }
   }
+  
   return null;
 }
 
@@ -255,6 +308,7 @@ Commands:
   /resume   - Resume a previous session
   /config   - Configure API key
   /folder   - Configure plan folder name
+  /export   - Export generated plan files
   /exit     - Exit FlowCode
 `);
 }
@@ -430,6 +484,33 @@ async function main() {
             console.log('Folder name unchanged.\n');
           }
           break;
+          
+        case '/export':
+          const exportConfig = getConfig();
+          const exportPath = getPlanFolderPath(session.projectPath);
+          const versionedPath = getVersionedPlanFolderPath(session.projectPath, session.planVersion || 1);
+          
+          if (session.planGenerated) {
+            console.log(`\n📁 Plan files location:`);
+            console.log(`   Versioned: ${versionedPath}/`);
+            console.log(`   Current: ${exportPath}/`);
+            console.log(`\n📄 Files generated:`);
+            const fileOrder = ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS'];
+            for (const fileName of fileOrder) {
+              const filePath = path.join(versionedPath, `${fileName.toLowerCase()}.md`);
+              if (fs.existsSync(filePath)) {
+                const stats = fs.statSync(filePath);
+                const sizeKB = (stats.size / 1024).toFixed(1);
+                console.log(`   ✅ ${fileName}.md (${sizeKB} KB)`);
+              } else {
+                console.log(`   ❌ ${fileName}.md (not found)`);
+              }
+            }
+            console.log('');
+          } else {
+            console.log('\n❌ No plan generated yet for this session. Chat with AI to generate a plan first.\n');
+          }
+          break;
 
         default:
           console.log(`Unknown command: ${command}. Type /help for help.\n`);
@@ -448,13 +529,13 @@ async function main() {
     session = addMessage(session.id, userMessage);
 
     // Get AI response
-    console.log('\n🤖 AI: ');
     const messages = session.messages.map(m => ({
       role: m.role,
       content: m.content
     }));
 
     try {
+      console.log('\n🤖 AI: ');
       const response = await chatWithGemini(messages, config.geminiApiKey);
       console.log('\n');
 
@@ -469,6 +550,7 @@ async function main() {
 
       // Check for plan JSON
       const planJson = extractPlanJson(response);
+      
       if (planJson && planJson.files) {
         const version = getNextPlanVersion(session.projectPath);
         writePlanFiles(session.projectPath, planJson.files, version);
