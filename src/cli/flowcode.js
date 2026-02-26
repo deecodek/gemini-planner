@@ -6,10 +6,18 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-// Configuration
-const FLOWCODE_DIR = path.join(os.homedir(), '.flowcode');
-const CONFIG_PATH = path.join(FLOWCODE_DIR, 'config.json');
-const SESSIONS_DIR = path.join(FLOWCODE_DIR, 'sessions');
+// Configuration - use current working directory for per-project config
+function getFlowcodeDir() {
+  return path.join(process.cwd(), '.flowcode');
+}
+
+function getConfigPath() {
+  return path.join(getFlowcodeDir(), 'config.json');
+}
+
+function getSessionsDir() {
+  return path.join(getFlowcodeDir(), 'sessions');
+}
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -56,29 +64,37 @@ IMPORTANT RULES:
 
 // Config functions
 function ensureConfigExists() {
-  if (!fs.existsSync(FLOWCODE_DIR)) {
-    fs.mkdirSync(FLOWCODE_DIR, { recursive: true });
+  const flowcodeDir = getFlowcodeDir();
+  const configPath = getConfigPath();
+  const sessionsDir = getSessionsDir();
+  
+  if (!fs.existsSync(flowcodeDir)) {
+    fs.mkdirSync(flowcodeDir, { recursive: true });
   }
-  if (!fs.existsSync(SESSIONS_DIR)) {
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
   }
-  if (!fs.existsSync(CONFIG_PATH)) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+  if (!fs.existsSync(configPath)) {
+    fs.writeFileSync(configPath, JSON.stringify({
       geminiApiKey: '',
-      planFolderName: 'build-markdown'
+      planFolderName: 'plan',
+      projectPath: process.cwd(),
+      createdAt: Date.now()
     }, null, 2));
   }
 }
 
 function getConfig() {
   ensureConfigExists();
-  const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
+  const configPath = getConfigPath();
+  const content = fs.readFileSync(configPath, 'utf-8');
   return JSON.parse(content);
 }
 
 function saveConfig(config) {
   ensureConfigExists();
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  const configPath = getConfigPath();
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
 // Session functions
@@ -87,7 +103,7 @@ function generateSessionId() {
 }
 
 function getSessionPath(sessionId) {
-  return path.join(SESSIONS_DIR, `${sessionId}.json`);
+  return path.join(getSessionsDir(), `${sessionId}.json`);
 }
 
 function createSession(projectPath, projectName) {
@@ -129,12 +145,13 @@ function addMessage(sessionId, message) {
 }
 
 function getAllSessions() {
-  if (!fs.existsSync(SESSIONS_DIR)) {
+  const sessionsDir = getSessionsDir();
+  if (!fs.existsSync(sessionsDir)) {
     return [];
   }
-  const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+  const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
   const sessions = files.map(file => {
-    const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
+    const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
     return JSON.parse(content);
   });
   return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -308,7 +325,7 @@ Commands:
   /resume   - Resume a previous session
   /config   - Configure API key
   /folder   - Configure plan folder name
-  /export   - Export generated plan files
+  /export   - Export generated plan files to a folder
   /exit     - Exit FlowCode
 `);
 }
@@ -317,23 +334,20 @@ async function setupApiKey(rl) {
   const config = getConfig();
   
   if (!config.geminiApiKey) {
-    console.log('\n⚠️  No API key configured.\n');
+    console.log('\n⚠️  No API key configured for this project.\n');
     return new Promise((resolve) => {
       rl.question('Enter your Gemini API key: ', (apiKey) => {
         config.geminiApiKey = apiKey;
         
-        if (!config.planFolderName) {
-          rl.question('Plan folder name (default: plan): ', (folderName) => {
-            config.planFolderName = folderName.trim() || 'plan';
-            saveConfig(config);
-            console.log('✅ Configuration saved!\n');
-            resolve(config);
-          });
-        } else {
+        // Ask for plan folder name
+        const defaultFolder = config.planFolderName || 'plan';
+        rl.question(`Plan folder name (default: ${defaultFolder}): `, (folderName) => {
+          config.planFolderName = folderName.trim() || defaultFolder;
+          config.projectPath = process.cwd();
           saveConfig(config);
-          console.log('✅ API key saved!\n');
+          console.log('✅ Configuration saved in .flowcode/config.json!\n');
           resolve(config);
-        }
+        });
       });
     });
   }
@@ -391,14 +405,16 @@ async function main() {
       session = sessions[0];
       console.log(`\n📁 Resumed: ${session.projectName}`);
       console.log(`   Messages: ${session.messages.length}`);
-      console.log(`   Plan: ${session.planGenerated ? `v${session.planVersion}` : 'Not generated'}\n`);
+      console.log(`   Plan: ${session.planGenerated ? `v${session.planVersion}` : 'Not generated'}`);
+      console.log(`📁 Config at: ${getConfigPath()}\n`);
     }
   }
 
   if (!session) {
     const projectName = await question(rl, 'Project name: ');
     session = createSession(process.cwd(), projectName || 'New Project');
-    console.log(`\n✨ Started new session: ${session.projectName}\n`);
+    console.log(`\n✨ Started new session: ${session.projectName}`);
+    console.log(`📁 Config stored at: ${getConfigPath()}\n`);
   }
 
   console.log('💬 Start chatting! Type /help for commands.\n');
@@ -439,7 +455,8 @@ async function main() {
         case '/new':
           const newName = await question(rl, 'New project name: ');
           session = createSession(process.cwd(), newName || 'New Project');
-          console.log(`\n✨ Started new session: ${session.projectName}\n`);
+          console.log(`\n✨ Started new session: ${session.projectName}`);
+          console.log(`📁 Config stored at: ${getConfigPath()}\n`);
           break;
 
         case '/sessions':
@@ -486,30 +503,46 @@ async function main() {
           break;
           
         case '/export':
-          const exportConfig = getConfig();
-          const exportPath = getPlanFolderPath(session.projectPath);
-          const versionedPath = getVersionedPlanFolderPath(session.projectPath, session.planVersion || 1);
-          
-          if (session.planGenerated) {
-            console.log(`\n📁 Plan files location:`);
-            console.log(`   Versioned: ${versionedPath}/`);
-            console.log(`   Current: ${exportPath}/`);
-            console.log(`\n📄 Files generated:`);
-            const fileOrder = ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS'];
-            for (const fileName of fileOrder) {
-              const filePath = path.join(versionedPath, `${fileName.toLowerCase()}.md`);
-              if (fs.existsSync(filePath)) {
-                const stats = fs.statSync(filePath);
-                const sizeKB = (stats.size / 1024).toFixed(1);
-                console.log(`   ✅ ${fileName}.md (${sizeKB} KB)`);
-              } else {
-                console.log(`   ❌ ${fileName}.md (not found)`);
-              }
-            }
-            console.log('');
-          } else {
+          if (!session.planGenerated) {
             console.log('\n❌ No plan generated yet for this session. Chat with AI to generate a plan first.\n');
+            break;
           }
+          
+          const exportFolderName = await question(rl, '\nEnter export folder name (or path): ');
+          if (!exportFolderName || !exportFolderName.trim()) {
+            console.log('Export cancelled.\n');
+            break;
+          }
+          
+          let exportFolder = exportFolderName.trim();
+          
+          // If it's not an absolute path, create it relative to current directory
+          if (!path.isAbsolute(exportFolder)) {
+            exportFolder = path.join(process.cwd(), exportFolder);
+          }
+          
+          // Create the export folder if it doesn't exist
+          if (!fs.existsSync(exportFolder)) {
+            fs.mkdirSync(exportFolder, { recursive: true });
+          }
+          
+          const versionedPath = getVersionedPlanFolderPath(session.projectPath, session.planVersion || 1);
+          const fileOrder = ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS'];
+          
+          let copiedCount = 0;
+          console.log(`\n📁 Exporting to: ${exportFolder}\n`);
+          
+          for (const fileName of fileOrder) {
+            const sourceFile = path.join(versionedPath, `${fileName.toLowerCase()}.md`);
+            if (fs.existsSync(sourceFile)) {
+              const destFile = path.join(exportFolder, `${fileName.toLowerCase()}.md`);
+              fs.copyFileSync(sourceFile, destFile);
+              console.log(`   ✅ ${fileName}.md`);
+              copiedCount++;
+            }
+          }
+          
+          console.log(`\n✅ Successfully exported ${copiedCount} files to ${exportFolder}\n`);
           break;
 
         default:
