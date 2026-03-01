@@ -1,0 +1,11 @@
+{
+  "geminiApiKey": "",
+  "planFolderName": "plan",
+  "projectPath": "./",
+  "createdAt": 0,
+  "agents": [
+    "alice:frontend",
+    "bob:backend",
+    { "name": "carol", "skills": ["devops", "infra"] }
+  ]
+}

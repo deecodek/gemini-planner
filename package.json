@@ -9,7 +9,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/cli/flowcode.js",
-    "dev": "node src/cli/flowcode.js"
+    "dev": "node src/cli/flowcode.js",
+    "test": "node --test"
   },
   "keywords": [
     "ai",
@@ -22,8 +23,5 @@
   "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.21.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.0"
   }
 }

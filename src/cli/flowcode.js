@@ -41,17 +41,27 @@ When ready, output the JSON wrapped in markdown code blocks like this:
   "projectName": "string",
   "planVersion": 1,
   "files": {
-    "PRD": "markdown content for PRD",
-    "ARCHITECTURE": "markdown content for Architecture",
-    "STACK": "markdown content for Tech Stack",
-    "TASKS": "markdown content for Tasks",
-    "STRUCTURE": "markdown content for Project Structure",
-    "SCHEMA": "markdown content for Data Schema",
+    "PRD": "markdown content for Product Requirements Document",
+    "ARCHITECTURE": "markdown content for System Architecture Design",
+    "STACK": "markdown content for Technology Stack",
+    "TASKS": "markdown content for Project Tasks and Timeline",
+    "STRUCTURE": "markdown content for Project File Structure",
+    "SCHEMA": "markdown content for Data Schema Design",
     "CONVENTIONS": "markdown content for Coding Conventions",
     "ENV": "markdown content for Environment Variables",
-    "API": "markdown content for API Design",
+    "API": "markdown content for API Design and Endpoints",
     "UI": "markdown content for UI/UX Design",
-    "ERRORS": "markdown content for Error Handling"
+    "ERRORS": "markdown content for Error Handling Strategy",
+    "ORCHESTRATOR": "markdown content for Agent Orchestration and coordination logic",
+    "TESTING": "markdown content for Comprehensive testing strategies and test cases",
+    "INTELLIGENCE": "markdown content for AI decision-making rules and reasoning logic",
+    "WORKFLOW": "markdown content for Agent workflow and state transitions",
+    "PROMPTS": "markdown content for AI prompt templates and variations",
+    "EVALUATION": "markdown content for Quality metrics and success criteria",
+    "DEPENDENCIES": "markdown content for All dependencies with versions for reproducible builds",
+    "SECURITY": "markdown content for Security practices and data protection",
+    "DEPLOYMENT": "markdown content for Deployment instructions and CI/CD pipeline",
+    "MONITORING": "markdown content for Logging, observability, and debugging"
   }
 }
 \`\`\`
@@ -60,6 +70,7 @@ IMPORTANT RULES:
 - Always wrap the JSON in \`\`\`md code blocks (NOT \`\`\`json)
 - After generating the plan, tell the user the plan is ready
 - Keep responses concise and conversational
+- Generate meaningful content for all 21 files based on the project
 `;
 
 // Config functions
@@ -185,7 +196,12 @@ function writePlanFiles(projectPath, files, version) {
     fs.mkdirSync(versionedFolder, { recursive: true });
   }
   
-  const fileOrder = ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS'];
+  const fileOrder = [
+    'PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 
+    'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS',
+    'ORCHESTRATOR', 'TESTING', 'INTELLIGENCE', 'WORKFLOW', 'PROMPTS', 'EVALUATION',
+    'DEPENDENCIES', 'SECURITY', 'DEPLOYMENT', 'MONITORING'
+  ];
   
   console.log('\n📝 Generating plan files...\n');
   
@@ -427,7 +443,7 @@ async function main() {
       const prefix = msg.role === 'user' ? '👤 You' : '🤖 AI';
       console.log(`${prefix}: ${msg.content}\n`);
     });
-    console.log('\n--- End of history ---\n');
+    console.log('\n--- End of history ---\n'); 
   }
 
   let running = true;
@@ -501,6 +517,8 @@ async function main() {
             console.log('Folder name unchanged.\n');
           }
           break;
+        
+
           
         case '/export':
           if (!session.planGenerated) {
@@ -527,7 +545,12 @@ async function main() {
           }
           
           const versionedPath = getVersionedPlanFolderPath(session.projectPath, session.planVersion || 1);
-          const fileOrder = ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS'];
+          const fileOrder = [
+            'PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 
+            'CONVENTIONS', 'ENV', 'API', 'UI', 'ERRORS',
+            'ORCHESTRATOR', 'TESTING', 'INTELLIGENCE', 'WORKFLOW', 'PROMPTS', 'EVALUATION',
+            'DEPENDENCIES', 'SECURITY', 'DEPLOYMENT', 'MONITORING'
+          ];
           
           let copiedCount = 0;
           console.log(`\n📁 Exporting to: ${exportFolder}\n`);

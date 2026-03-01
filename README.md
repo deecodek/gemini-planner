@@ -118,6 +118,38 @@ Project name: My Awesome App
 
 ## Stack
 
+## Assignment Command and Sample Config
+
+FlowCode includes an `/assign` command to assign parsed tasks from the generated `TASKS.md` to local agents.
+
+Usage:
+
+1. After generating a plan, run the CLI and use the `/assign` command.
+2. FlowCode will try to detect agents from `.flowcode/config.json`; if none are present it will prompt you to enter agents in the format `name:skill` (comma-separated), for example: `alice:frontend,bob:backend`.
+3. You can optionally persist the assignment into the plan folder (it will be saved as `assignments.json` under the plan version folder).
+
+Sample `.flowcode/config.json` (project-level overrides are loaded when present):
+
+```json
+{
+      "geminiApiKey": "",
+      "planFolderName": "plan",
+      "projectPath": "./",
+      "createdAt": 0,
+      "agents": [
+            "alice:frontend",
+            "bob:backend",
+            { "name": "carol", "skills": ["devops", "infra"] }
+      ]
+}
+```
+
+Notes:
+
+- The `agents` array may contain simple `"name:skill"` strings or objects with `name` and `skills` fields.
+- `assignments.json` schema: `{ assignedAt: <timestamp>, assignment: [ { name, tasks: [...] } ] }`.
+
+
 - **Runtime**: Node.js
 - **AI**: Google Generative AI SDK (Gemini)
 - **Model**: gemini-2.5-flash
