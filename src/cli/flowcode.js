@@ -11,6 +11,7 @@ const FLOWCODE_DIR = path.join(os.homedir(), '.flowcode');
 const CONFIG_PATH = path.join(FLOWCODE_DIR, 'config.json');
 const SESSIONS_DIR = path.join(FLOWCODE_DIR, 'sessions');
 const CONTEXTS_DIR = path.join(FLOWCODE_DIR, 'contexts');
+const MEMORY_PATH = path.join(FLOWCODE_DIR, 'memory.json');
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -39,7 +40,201 @@ const DEFAULT_FILES = [
   { key: 'MONITORING', label: 'MONITORING - Logging & Observability', selected: false },
 ];
 
-// Config functions
+// Project templates
+const PROJECT_TEMPLATES = {
+  'web-app': {
+    name: 'Web Application',
+    defaultFiles: ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'API', 'UI', 'ERRORS', 'TESTING', 'SECURITY', 'DEPLOYMENT'],
+    description: 'Full-stack web application with frontend and backend'
+  },
+  'api-service': {
+    name: 'API Service',
+    defaultFiles: ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'SCHEMA', 'API', 'ERRORS', 'TESTING', 'SECURITY', 'DEPLOYMENT', 'MONITORING'],
+    description: 'Backend API or microservice'
+  },
+  'ai-agent': {
+    name: 'AI Agent System',
+    defaultFiles: ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'ORCHESTRATOR', 'INTELLIGENCE', 'WORKFLOW', 'PROMPTS', 'TESTING', 'EVALUATION', 'SECURITY'],
+    description: 'AI-powered agent or automation system'
+  },
+  'cli-tool': {
+    name: 'CLI Tool',
+    defaultFiles: ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'CONVENTIONS', 'TESTING', 'DEPLOYMENT'],
+    description: 'Command-line interface tool'
+  },
+  'mobile-app': {
+    name: 'Mobile Application',
+    defaultFiles: ['PRD', 'ARCHITECTURE', 'STACK', 'TASKS', 'STRUCTURE', 'API', 'UI', 'ERRORS', 'TESTING', 'SECURITY', 'DEPLOYMENT'],
+    description: 'iOS/Android mobile application'
+  },
+  'custom': {
+    name: 'Custom Project',
+    defaultFiles: DEFAULT_FILES.filter(f => f.selected).map(f => f.key),
+    description: 'Fully customizable project type'
+  }
+};
+
+// Memory functions - Learn from all projects
+function loadMemory() {
+  if (!fs.existsSync(MEMORY_PATH)) {
+    return {
+      preferences: {},
+      patterns: [],
+      projectCount: 0
+    };
+  }
+  const content = fs.readFileSync(MEMORY_PATH, 'utf-8');
+  return JSON.parse(content);
+}
+
+function saveMemory(memory) {
+  fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+}
+
+function learnFromProject(session, generatedFiles) {
+  const memory = loadMemory();
+  
+  // Extract patterns from this project
+  const patterns = {
+    projectId: session.id,
+    projectName: session.projectName,
+    timestamp: Date.now(),
+    filesGenerated: Object.keys(generatedFiles),
+    messageCount: session.messages.length,
+    keywords: extractKeywords(session.messages)
+  };
+  
+  memory.patterns.push(patterns);
+  memory.projectCount++;
+  
+  // Keep only last 50 projects
+  if (memory.patterns.length > 50) {
+    memory.patterns = memory.patterns.slice(-50);
+  }
+  
+  saveMemory(memory);
+  return memory;
+}
+
+function extractKeywords(messages) {
+  const text = messages.map(m => m.content).join(' ').toLowerCase();
+  const techKeywords = [
+    'typescript', 'javascript', 'python', 'react', 'node', 'docker', 
+    'kubernetes', 'aws', 'mongodb', 'postgresql', 'graphql', 'rest',
+    'microservices', 'serverless', 'mobile', 'ios', 'android'
+  ];
+  
+  return techKeywords.filter(keyword => text.includes(keyword));
+}
+
+function getLearnedPreferences() {
+  const memory = loadMemory();
+  if (memory.patterns.length === 0) return {};
+  
+  // Analyze patterns to find preferences
+  const keywordCount = {};
+  memory.patterns.forEach(pattern => {
+    pattern.keywords.forEach(kw => {
+      keywordCount[kw] = (keywordCount[kw] || 0) + 1;
+    });
+  });
+  
+  // Return top preferences
+  const sorted = Object.entries(keywordCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([kw]) => kw);
+  
+  return {
+    preferredTechnologies: sorted,
+    projectCount: memory.projectCount
+  };
+}
+
+// Consistency checker - Validate plan files don't contradict
+function checkConsistency(files) {
+  const issues = [];
+  
+  // Check for technology mismatches
+  const stack = files.STACK || '';
+  const schema = files.SCHEMA || '';
+  const architecture = files.ARCHITECTURE || '';
+  
+  // Database consistency
+  const stackDb = extractDatabases(stack);
+  const schemaDb = extractDatabases(schema);
+  
+  if (stackDb.length > 0 && schemaDb.length > 0) {
+    const hasConflict = !stackDb.some(db => schemaDb.includes(db));
+    if (hasConflict) {
+      issues.push({
+        type: 'database_mismatch',
+        severity: 'warning',
+        message: `STACK mentions ${stackDb.join(', ')} but SCHEMA mentions ${schemaDb.join(', ')}`,
+        files: ['STACK', 'SCHEMA']
+      });
+    }
+  }
+  
+  // Check if TASKS reference files that exist in STRUCTURE
+  if (files.TASKS && files.STRUCTURE) {
+    const taskFiles = extractFileReferences(files.TASKS);
+    const structureFiles = extractFileReferences(files.STRUCTURE);
+    
+    taskFiles.forEach(file => {
+      if (file.endsWith('.ts') || file.endsWith('.js') || file.endsWith('.py')) {
+        // Check if parent directory exists in structure
+        const parentDir = path.dirname(file);
+        if (parentDir !== '.' && !structureFiles.some(f => f.includes(parentDir))) {
+          issues.push({
+            type: 'missing_directory',
+            severity: 'info',
+            message: `TASKS references ${file} but directory may not exist in STRUCTURE`,
+            files: ['TASKS', 'STRUCTURE']
+          });
+        }
+      }
+    });
+  }
+  
+  // Check API endpoints match architecture
+  if (files.API && files.ARCHITECTURE) {
+    const apiEndpoints = extractEndpoints(files.API);
+    const archEndpoints = extractEndpoints(files.ARCHITECTURE);
+    
+    if (apiEndpoints.length > 0 && archEndpoints.length > 0) {
+      const missingInArch = apiEndpoints.filter(ep => !archEndpoints.includes(ep));
+      if (missingInArch.length > 0) {
+        issues.push({
+          type: 'api_architecture_mismatch',
+          severity: 'warning',
+          message: `API defines endpoints not mentioned in ARCHITECTURE: ${missingInArch.slice(0, 3).join(', ')}`,
+          files: ['API', 'ARCHITECTURE']
+        });
+      }
+    }
+  }
+  
+  return issues;
+}
+
+function extractDatabases(text) {
+  const dbs = ['postgresql', 'mysql', 'mongodb', 'redis', 'sqlite', 'firebase', 'supabase'];
+  return dbs.filter(db => text.toLowerCase().includes(db));
+}
+
+function extractFileReferences(text) {
+  // Match file paths like src/index.ts, components/Button.tsx, etc.
+  const matches = text.match(/[a-zA-Z0-9_\-\/]+\.[a-z]{2,4}/g) || [];
+  return matches;
+}
+
+function extractEndpoints(text) {
+  // Match API endpoints like /api/users, POST /items, etc.
+  const matches = text.match(/(GET|POST|PUT|DELETE|PATCH)?\s*\/[a-zA-Z0-9_\-\/]+/g) || [];
+  return matches;
+}
+
 function ensureConfigExists() {
   if (!fs.existsSync(FLOWCODE_DIR)) {
     fs.mkdirSync(FLOWCODE_DIR, { recursive: true });
@@ -56,7 +251,8 @@ function ensureConfigExists() {
       planFolderName: 'plan',
       customInstructions: '',
       customFiles: [],
-      selectedFiles: DEFAULT_FILES.map(f => f.key)
+      selectedFiles: DEFAULT_FILES.map(f => f.key),
+      projectTemplate: 'custom'
     }, null, 2));
   }
 }
@@ -71,7 +267,8 @@ function getConfig() {
     planFolderName: config.planFolderName || 'plan',
     customInstructions: config.customInstructions || '',
     customFiles: config.customFiles || [],
-    selectedFiles: config.selectedFiles || DEFAULT_FILES.filter(f => f.selected).map(f => f.key)
+    selectedFiles: config.selectedFiles || DEFAULT_FILES.filter(f => f.selected).map(f => f.key),
+    projectTemplate: config.projectTemplate || 'custom'
   };
 }
 
@@ -205,6 +402,184 @@ function writePlanFiles(projectPath, files, version) {
   }
   
   console.log('');
+}
+
+// Multi-step generation with validation
+async function generatePlanInSteps(messages, apiKey, files) {
+  console.log('\n🔄 Generating plan in steps...\n');
+  
+  const generatedFiles = {};
+  const stepResults = [];
+  
+  // Step 1: Generate core files first
+  const coreFiles = ['PRD', 'ARCHITECTURE', 'STACK'];
+  console.log('Step 1/3: Generating core files...');
+  for (const file of coreFiles) {
+    if (files.includes(file)) {
+      console.log(`  Generating ${file}...`);
+      const content = await generateSingleFile(messages, apiKey, file, files);
+      generatedFiles[file] = content;
+      stepResults.push({ file, status: 'done' });
+    }
+  }
+  
+  // Step 2: Generate dependent files with context from core
+  const dependentFiles = ['STRUCTURE', 'SCHEMA', 'API', 'TASKS'];
+  console.log('\nStep 2/3: Generating dependent files...');
+  for (const file of dependentFiles) {
+    if (files.includes(file)) {
+      console.log(`  Generating ${file}...`);
+      const content = await generateSingleFile(messages, apiKey, file, files, generatedFiles);
+      generatedFiles[file] = content;
+      stepResults.push({ file, status: 'done' });
+    }
+  }
+  
+  // Step 3: Generate remaining files
+  const remainingFiles = files.filter(f => !coreFiles.includes(f) && !dependentFiles.includes(f));
+  console.log('\nStep 3/3: Generating remaining files...');
+  for (const file of remainingFiles) {
+    console.log(`  Generating ${file}...`);
+    const content = await generateSingleFile(messages, apiKey, file, files, generatedFiles);
+    generatedFiles[file] = content;
+    stepResults.push({ file, status: 'done' });
+  }
+  
+  // Validate consistency
+  console.log('\n✅ Validating consistency...');
+  const issues = checkConsistency(generatedFiles);
+  
+  if (issues.length > 0) {
+    console.log(`\n⚠️  Found ${issues.length} consistency issue(s):\n`);
+    issues.forEach((issue, i) => {
+      console.log(`  ${i + 1}. [${issue.severity.toUpperCase()}] ${issue.message}`);
+      console.log(`     Files: ${issue.files.join(', ')}\n`);
+    });
+    
+    // Ask user if they want to fix
+    const rl = createReadlineInterface();
+    const answer = await question(rl, '\nFix consistency issues? (y/n): ');
+    rl.close();
+    
+    if (answer.toLowerCase() === 'y') {
+      console.log('\n🔄 Fixing issues...\n');
+      for (const issue of issues) {
+        if (issue.severity === 'warning') {
+          for (const file of issue.files) {
+            if (generatedFiles[file]) {
+              console.log(`  Refining ${file}...`);
+              const refinedContent = await refineFile(messages, apiKey, file, generatedFiles, issue);
+              generatedFiles[file] = refinedContent;
+            }
+          }
+        }
+      }
+      console.log('✅ Issues fixed!\n');
+    }
+  } else {
+    console.log('✅ No consistency issues found!\n');
+  }
+  
+  return { generatedFiles, stepResults, issues };
+}
+
+async function generateSingleFile(messages, apiKey, fileName, allFiles, context = {}) {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const config = getConfig();
+  
+  const contextPrompt = Object.keys(context).length > 0 ? `
+  
+Context from already-generated files:
+${Object.entries(context).slice(0, 3).map(([k, v]) => `${k}: ${v.substring(0, 200)}...`).join('\n')}
+
+Ensure consistency with these files.` : '';
+  
+  const prompt = `Generate ONLY the content for ${fileName}.md file.
+
+Project context from conversation:
+${messages.map(m => `${m.role}: ${m.content}`).join('\n')}
+${contextPrompt}
+
+Requirements:
+- Write comprehensive, production-ready content
+- Use proper markdown formatting
+- Include code examples where relevant
+- Be specific to this project, not generic
+- Output ONLY the markdown content, no explanations
+
+Generate ${fileName}.md content:`;
+
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+async function refineFile(messages, apiKey, fileName, currentFiles, issue) {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  
+  const prompt = `Refine ${fileName} to fix this consistency issue:
+
+Issue: ${issue.message}
+
+Current content:
+${currentFiles[fileName]?.substring(0, 2000) || 'N/A'}
+
+Generate improved content that resolves the issue while maintaining quality.
+Output ONLY the revised markdown content:`;
+
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+// Quality scoring for generated plan
+function scorePlanQuality(files) {
+  let score = 0;
+  const maxScore = 100;
+  const checks = [];
+  
+  // Check 1: File count (20 points)
+  const fileCount = Object.keys(files).length;
+  const fileScore = Math.min(20, (fileCount / 15) * 20);
+  score += fileScore;
+  checks.push({ name: 'File Coverage', score: fileScore, max: 20 });
+  
+  // Check 2: Content length (30 points)
+  let totalLength = 0;
+  Object.values(files).forEach(content => {
+    totalLength += content.length;
+  });
+  const avgLength = totalLength / fileCount;
+  const lengthScore = Math.min(30, (avgLength / 1000) * 30);
+  score += lengthScore;
+  checks.push({ name: 'Content Depth', score: lengthScore, max: 30 });
+  
+  // Check 3: Has code examples (20 points)
+  let hasCodeExamples = false;
+  Object.values(files).forEach(content => {
+    if (content.includes('```')) hasCodeExamples = true;
+  });
+  const codeScore = hasCodeExamples ? 20 : 5;
+  score += codeScore;
+  checks.push({ name: 'Code Examples', score: codeScore, max: 20 });
+  
+  // Check 4: Has specific details (30 points)
+  let hasSpecifics = false;
+  Object.values(files).forEach(content => {
+    if (content.match(/\b(should|must|will|api|endpoint|database|component|function)\b/i)) {
+      hasSpecifics = true;
+    }
+  });
+  const specificsScore = hasSpecifics ? 30 : 10;
+  score += specificsScore;
+  checks.push({ name: 'Specific Details', score: specificsScore, max: 30 });
+  
+  return {
+    totalScore: Math.round(score),
+    maxScore,
+    checks,
+    grade: score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D'
+  };
 }
 
 // Gemini functions
@@ -375,12 +750,22 @@ Commands:
   /resume     - Resume a previous session
   /config     - Configure API key and settings
   /files      - Select which markdown files to generate
+  /template   - Choose from project templates (web-app, api-service, ai-agent, etc.)
   /export     - Export plan files to a folder
   /context    - Export conversation context
   /import     - Import conversation context
   /instructions - Set custom AI instructions
   /custom     - Add custom markdown file
+  /memory     - View learned preferences from all projects
+  /quality    - Check plan quality score and consistency
   /exit       - Exit FlowCode
+
+Advanced Features:
+  • Multi-step generation with validation
+  • Consistency checking across files
+  • Quality scoring (A-F grade)
+  • Project memory & pattern learning
+  • Smart templates for common project types
 `);
 }
 
@@ -676,15 +1061,87 @@ async function main() {
             console.log('Cancelled.\n');
             break;
           }
-          
+
           const customDesc = await question(rl, 'Description (e.g., Kubernetes deployment config): ');
-          
+
           const customFiles = config.customFiles || [];
           customFiles.push({ name: customName.toUpperCase(), description: customDesc });
           saveConfig({ customFiles });
           console.log(`✅ Custom file "${customName}" added!\n`);
           break;
           
+        case '/template':
+          console.log('\n📋 Project Templates:\n');
+          Object.entries(PROJECT_TEMPLATES).forEach(([key, template]) => {
+            console.log(`  ${key.padEnd(12)} - ${template.description}`);
+            console.log(`               Default files: ${template.defaultFiles.length}\n`);
+          });
+          
+          const templateChoice = await question(rl, 'Select template (or Enter to cancel): ');
+          if (templateChoice && PROJECT_TEMPLATES[templateChoice]) {
+            const template = PROJECT_TEMPLATES[templateChoice];
+            saveConfig({ 
+              selectedFiles: template.defaultFiles,
+              projectTemplate: templateChoice
+            });
+            console.log(`\n✅ Template "${template.name}" selected!`);
+            console.log(`   ${template.defaultFiles.length} files will be generated\n`);
+          }
+          break;
+          
+        case '/memory':
+          const memory = loadMemory();
+          const preferences = getLearnedPreferences();
+          
+          console.log('\n🧠 Project Memory:\n');
+          console.log(`   Total Projects: ${memory.projectCount || 0}`);
+          console.log(`   Preferred Technologies: ${preferences.preferredTechnologies?.join(', ') || 'None yet'}`);
+          console.log(`   Recent Projects: ${Math.min(memory.patterns?.length || 0, 5)}\n`);
+          
+          if (memory.patterns && memory.patterns.length > 0) {
+            console.log('   Recent:');
+            memory.patterns.slice(-5).forEach((p, i) => {
+              const date = new Date(p.timestamp).toLocaleDateString();
+              console.log(`     ${i + 1}. ${p.projectName} (${date}) - ${p.filesGenerated.length} files`);
+            });
+            console.log('');
+          }
+          break;
+          
+        case '/quality':
+          if (!session.planGenerated) {
+            console.log('\n❌ No plan generated yet.\n');
+            break;
+          }
+
+          // Load plan files and score
+          const qualityPlanMsg = session.messages.find(m => m.isPlanJson);
+          if (qualityPlanMsg) {
+            const planJson = extractPlanJson(qualityPlanMsg.content);
+            if (planJson && planJson.files) {
+              const qualityScore = scorePlanQuality(planJson.files);
+              const consistencyIssues = checkConsistency(planJson.files);
+
+              console.log('\n📊 Plan Quality Report:\n');
+              console.log(`   Overall Score: ${qualityScore.totalScore}/${qualityScore.maxScore}`);
+              console.log(`   Grade: ${qualityScore.grade}`);
+              console.log('\n   Breakdown:');
+              qualityScore.checks.forEach(check => {
+                console.log(`     ${check.name.padEnd(20)} ${Math.round(check.score)}/${check.max}`);
+              });
+
+              if (consistencyIssues.length > 0) {
+                console.log(`\n   ⚠️  Consistency Issues: ${consistencyIssues.length}`);
+                consistencyIssues.forEach((issue, i) => {
+                  console.log(`     ${i + 1}. ${issue.message}`);
+                });
+              } else {
+                console.log('\n   ✅ No consistency issues\n');
+              }
+            }
+          }
+          break;
+
         default:
           console.log(`Unknown command: ${command}. Type /help for help.\n`);
       }
@@ -708,10 +1165,48 @@ async function main() {
     }));
     
     try {
+      const config = getConfig();
+      const selectedFiles = config.selectedFiles;
+      
+      // Ask if user wants multi-step generation with validation
+      if (trimmed.toLowerCase().includes('generate') && selectedFiles.length > 5) {
+        const rl2 = createReadlineInterface();
+        const useAdvanced = await question(rl2, '\n🚀 Use advanced multi-step generation with validation? (y/n): ');
+        rl2.close();
+        
+        if (useAdvanced.toLowerCase() === 'y') {
+          console.log('\n🔄 Starting advanced plan generation...\n');
+          
+          const { generatedFiles, stepResults, issues } = await generatePlanInSteps(
+            messages, 
+            config.geminiApiKey, 
+            selectedFiles
+          );
+          
+          const version = getNextPlanVersion(session.projectPath);
+          writePlanFiles(session.projectPath, generatedFiles, version);
+          
+          // Score quality
+          const qualityScore = scorePlanQuality(generatedFiles);
+          console.log(`\n📊 Plan Quality Score: ${qualityScore.totalScore}/${qualityScore.maxScore} (Grade: ${qualityScore.grade})`);
+          
+          // Learn from this project
+          learnFromProject(session, generatedFiles);
+          
+          session.planGenerated = true;
+          session.planVersion = version;
+          saveSession(session);
+          
+          console.log(`\n✅ Plan generated successfully!`);
+          console.log(`   Location: ${getPlanFolderPath(session.projectPath)}/v${version}/\n`);
+          continue;
+        }
+      }
+      
       console.log('\n🤖 AI: ');
       const response = await chatWithGemini(messages, config.geminiApiKey);
       console.log('\n');
-      
+
       // Add assistant message
       const assistantMessage = {
         id: `msg_${Date.now()}`,
@@ -720,22 +1215,22 @@ async function main() {
         timestamp: Date.now()
       };
       session = addMessage(session.id, assistantMessage);
-      
+
       // Check for plan JSON
       const planJson = extractPlanJson(response);
-      
+
       if (planJson && planJson.files) {
         const version = getNextPlanVersion(session.projectPath);
         writePlanFiles(session.projectPath, planJson.files, version);
-        
+
         session.planGenerated = true;
         session.planVersion = version;
         saveSession(session);
-        
+
         console.log('✅ Plan generated successfully!');
         console.log(`   Location: ${getPlanFolderPath(session.projectPath)}/v${version}/\n`);
       }
-      
+
     } catch (error) {
       console.error(`\n❌ Error: ${error.message}\n`);
     }
