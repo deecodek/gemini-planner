@@ -5,6 +5,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import chalk from 'chalk';
+import Table from 'cli-table3';
+import ora from 'ora';
+import clipboardy from 'clipboardy';
 
 // Configuration - Global (user home)
 const FLOWCODE_DIR = path.join(os.homedir(), '.flowcode');
@@ -406,78 +410,98 @@ function writePlanFiles(projectPath, files, version) {
 
 // Multi-step generation with validation
 async function generatePlanInSteps(messages, apiKey, files) {
-  console.log('\n🔄 Generating plan in steps...\n');
+  const spinner = ora({
+    text: chalk.cyan('Initializing generation...'),
+    spinner: 'dots'
+  }).start();
   
   const generatedFiles = {};
   const stepResults = [];
   
   // Step 1: Generate core files first
   const coreFiles = ['PRD', 'ARCHITECTURE', 'STACK'];
-  console.log('Step 1/3: Generating core files...');
+  spinner.text = chalk.cyan('Step 1/3: Generating core files...');
+  console.log('\n' + chalk.bold('📍 Step 1/3:') + chalk.cyan(' Core files\n'));
+  
   for (const file of coreFiles) {
     if (files.includes(file)) {
-      console.log(`  Generating ${file}...`);
+      spinner.text = chalk.cyan(`Generating ${file}...`);
+      spinner.start();
       const content = await generateSingleFile(messages, apiKey, file, files);
       generatedFiles[file] = content;
+      spinner.succeed(chalk.green(`${file}`));
       stepResults.push({ file, status: 'done' });
     }
   }
   
   // Step 2: Generate dependent files with context from core
   const dependentFiles = ['STRUCTURE', 'SCHEMA', 'API', 'TASKS'];
-  console.log('\nStep 2/3: Generating dependent files...');
+  spinner.text = chalk.cyan('Step 2/3: Generating dependent files...');
+  console.log('\n' + chalk.bold('📍 Step 2/3:') + chalk.cyan(' Dependent files\n'));
+  
   for (const file of dependentFiles) {
     if (files.includes(file)) {
-      console.log(`  Generating ${file}...`);
+      spinner.text = chalk.cyan(`Generating ${file}...`);
+      spinner.start();
       const content = await generateSingleFile(messages, apiKey, file, files, generatedFiles);
       generatedFiles[file] = content;
+      spinner.succeed(chalk.green(`${file}`));
       stepResults.push({ file, status: 'done' });
     }
   }
   
   // Step 3: Generate remaining files
   const remainingFiles = files.filter(f => !coreFiles.includes(f) && !dependentFiles.includes(f));
-  console.log('\nStep 3/3: Generating remaining files...');
+  spinner.text = chalk.cyan('Step 3/3: Generating remaining files...');
+  console.log('\n' + chalk.bold('📍 Step 3/3:') + chalk.cyan(' Remaining files\n'));
+  
   for (const file of remainingFiles) {
-    console.log(`  Generating ${file}...`);
+    spinner.text = chalk.cyan(`Generating ${file}...`);
+    spinner.start();
     const content = await generateSingleFile(messages, apiKey, file, files, generatedFiles);
     generatedFiles[file] = content;
+    spinner.succeed(chalk.green(`${file}`));
     stepResults.push({ file, status: 'done' });
   }
   
+  spinner.stop();
+  
   // Validate consistency
-  console.log('\n✅ Validating consistency...');
+  console.log('\n' + chalk.bold('✅') + chalk.cyan(' Validating consistency...\n'));
   const issues = checkConsistency(generatedFiles);
   
   if (issues.length > 0) {
-    console.log(`\n⚠️  Found ${issues.length} consistency issue(s):\n`);
+    console.log(chalk.yellow(`\n⚠️  Found ${issues.length} consistency issue(s):\n`));
     issues.forEach((issue, i) => {
-      console.log(`  ${i + 1}. [${issue.severity.toUpperCase()}] ${issue.message}`);
-      console.log(`     Files: ${issue.files.join(', ')}\n`);
+      const severityColor = issue.severity === 'warning' ? 'yellow' : 'blue';
+      console.log(chalk[severityColor](`  ${i + 1}. [${issue.severity.toUpperCase()}] ${issue.message}`));
+      console.log(chalk.gray(`     Files: ${issue.files.join(', ')}\n`));
     });
     
     // Ask user if they want to fix
     const rl = createReadlineInterface();
-    const answer = await question(rl, '\nFix consistency issues? (y/n): ');
+    const answer = await question(rl, chalk.yellow('\nFix consistency issues?') + chalk.gray(' (y/n): '));
     rl.close();
     
     if (answer.toLowerCase() === 'y') {
-      console.log('\n🔄 Fixing issues...\n');
+      console.log('\n' + chalk.bold.cyan('🔄 Fixing issues...\n'));
       for (const issue of issues) {
         if (issue.severity === 'warning') {
           for (const file of issue.files) {
             if (generatedFiles[file]) {
-              console.log(`  Refining ${file}...`);
+              spinner.text = chalk.cyan(`Refining ${file}...`);
+              spinner.start();
               const refinedContent = await refineFile(messages, apiKey, file, generatedFiles, issue);
               generatedFiles[file] = refinedContent;
+              spinner.succeed(chalk.green(`${file} refined`));
             }
           }
         }
       }
-      console.log('✅ Issues fixed!\n');
+      console.log(chalk.green('\n✅ Issues fixed!\n'));
     }
   } else {
-    console.log('✅ No consistency issues found!\n');
+    console.log(chalk.green('✅ No consistency issues found!\n'));
   }
   
   return { generatedFiles, stepResults, issues };
@@ -734,39 +758,58 @@ function createReadlineInterface() {
 }
 
 function printBanner() {
-  console.log('\n' + '='.repeat(60));
-  console.log('  🚀 FlowCode - AI Software Planner');
-  console.log('  Chat with AI to plan your next project');
-  console.log('  21 markdown files | Custom instructions | Context export');
-  console.log('='.repeat(60) + '\n');
+  console.log('\n');
+  console.log(chalk.bold.cyan('╔═══════════════════════════════════════════════════════════╗'));
+  console.log(chalk.bold.cyan('║                                                           ║'));
+  console.log(chalk.bold.cyan('║           🚀  FlowCode - AI Software Planner  🚀           ║'));
+  console.log(chalk.bold.cyan('║                                                           ║'));
+  console.log(chalk.cyan('║     Chat with AI to plan your next project              ║'));
+  console.log(chalk.cyan('║     21 files • Multi-step • Validation • Memory         ║'));
+  console.log(chalk.bold.cyan('║                                                           ║'));
+  console.log(chalk.bold.cyan('╚═══════════════════════════════════════════════════════════╝'));
+  console.log('\n');
 }
 
 function printHelp() {
-  console.log(`
-Commands:
-  /help       - Show this help message
-  /new        - Start a new conversation
-  /sessions   - List all sessions
-  /resume     - Resume a previous session
-  /config     - Configure API key and settings
-  /files      - Select which markdown files to generate
-  /template   - Choose from project templates (web-app, api-service, ai-agent, etc.)
-  /export     - Export plan files to a folder
-  /context    - Export conversation context
-  /import     - Import conversation context
-  /instructions - Set custom AI instructions
-  /custom     - Add custom markdown file
-  /memory     - View learned preferences from all projects
-  /quality    - Check plan quality score and consistency
-  /exit       - Exit FlowCode
+  const table = new Table({
+    head: [chalk.bold.cyan('Command'), chalk.bold.cyan('Description')],
+    colWidths: [20, 60],
+    style: {
+      head: ['cyan'],
+      border: ['gray']
+    }
+  });
 
-Advanced Features:
-  • Multi-step generation with validation
-  • Consistency checking across files
-  • Quality scoring (A-F grade)
-  • Project memory & pattern learning
-  • Smart templates for common project types
-`);
+  table.push(
+    [chalk.yellow('/help'), 'Show this help message'],
+    [chalk.yellow('/new'), 'Start a new conversation'],
+    [chalk.yellow('/sessions'), 'List all sessions'],
+    [chalk.yellow('/resume'), 'Resume a previous session'],
+    [chalk.yellow('/config'), 'Configure API key and settings'],
+    [chalk.yellow('/files'), 'Select which markdown files to generate'],
+    [chalk.yellow('/template'), 'Choose from project templates'],
+    [chalk.yellow('/export'), 'Export plan files to a folder'],
+    [chalk.yellow('/context'), 'Export conversation context'],
+    [chalk.yellow('/import'), 'Import conversation context'],
+    [chalk.yellow('/instructions'), 'Set custom AI instructions'],
+    [chalk.yellow('/custom'), 'Add custom markdown file'],
+    [chalk.yellow('/memory'), 'View learned preferences'],
+    [chalk.yellow('/quality'), 'Check plan quality score'],
+    [chalk.yellow('/copy'), 'Copy last response to clipboard'],
+    [chalk.yellow('/exit'), 'Exit FlowCode']
+  );
+
+  console.log('\n' + chalk.bold('📋 Available Commands:\n'));
+  console.log(table.toString());
+  
+  console.log('\n' + chalk.bold.cyan('✨ Advanced Features:'));
+  console.log(chalk.gray('  • Multi-step generation with validation'));
+  console.log(chalk.gray('  • Consistency checking across files'));
+  console.log(chalk.gray('  • Quality scoring (A-F grade)'));
+  console.log(chalk.gray('  • Project memory & pattern learning'));
+  console.log(chalk.gray('  • Smart templates for common project types'));
+  console.log(chalk.gray('  • Copy to clipboard with /copy command'));
+  console.log('\n');
 }
 
 function question(rl, query) {
@@ -779,26 +822,30 @@ async function setupApiKey(rl) {
   const config = getConfig();
   
   if (config.geminiApiKey) {
-    const masked = config.geminiApiKey.substring(0, 4) + '...' + config.geminiApiKey.substring(-4);
-    console.log(`\n✅ API key found: ${masked}`);
-    const answer = await question(rl, 'Use saved key or enter new one? (use/new): ');
+    const masked = '****' + config.geminiApiKey.slice(-4);
+    console.log(chalk.green('\n✅ API key found:') + ' ' + chalk.cyan(masked));
+    
+    const answer = await question(rl, chalk.yellow('Use saved key or enter new one?') + chalk.gray(' (use/new): '));
     
     if (answer.toLowerCase() === 'new') {
-      const newKey = await question(rl, 'Enter new API key: ');
+      const newKey = await question(rl, chalk.yellow('Enter new API key: '));
       if (newKey) {
-        const updated = saveConfig({ geminiApiKey: newKey });
-        console.log('✅ API key updated!\n');
-        return updated;
+        saveConfig({ geminiApiKey: newKey });
+        console.log(chalk.green('✅ API key updated!\n'));
+        return getConfig();
       }
     }
     return config;
   }
   
-  console.log('\n⚠️  No API key configured.\n');
-  const apiKey = await question(rl, 'Enter your Gemini API key: ');
-  const updated = saveConfig({ geminiApiKey: apiKey });
-  console.log('✅ API key saved!\n');
-  return updated;
+  console.log(chalk.yellow('\n⚠️  No API key configured.\n'));
+  console.log(chalk.gray('Get your API key from: ') + chalk.cyan('https://makersuite.google.com/app/apikey'));
+  console.log('');
+  
+  const apiKey = await question(rl, chalk.yellow('Enter your Gemini API key: '));
+  saveConfig({ geminiApiKey: apiKey });
+  console.log(chalk.green('✅ API key saved!\n'));
+  return getConfig();
 }
 
 async function selectFiles(rl) {
@@ -1071,21 +1118,37 @@ async function main() {
           break;
           
         case '/template':
-          console.log('\n📋 Project Templates:\n');
-          Object.entries(PROJECT_TEMPLATES).forEach(([key, template]) => {
-            console.log(`  ${key.padEnd(12)} - ${template.description}`);
-            console.log(`               Default files: ${template.defaultFiles.length}\n`);
+          console.log('\n' + chalk.bold.cyan('📋 Project Templates:\n'));
+          
+          const templateTable = new Table({
+            head: [chalk.bold('Type'), chalk.bold('Description'), chalk.bold('Files')],
+            colWidths: [15, 50, 10],
+            style: {
+              head: ['cyan'],
+              border: ['gray']
+            }
           });
           
-          const templateChoice = await question(rl, 'Select template (or Enter to cancel): ');
+          Object.entries(PROJECT_TEMPLATES).forEach(([key, template]) => {
+            templateTable.push([
+              chalk.yellow(key),
+              template.description,
+              chalk.green(template.defaultFiles.length.toString())
+            ]);
+          });
+          
+          console.log(templateTable.toString());
+          console.log('');
+          
+          const templateChoice = await question(rl, chalk.yellow('Select template') + chalk.gray(' (or Enter to cancel): '));
           if (templateChoice && PROJECT_TEMPLATES[templateChoice]) {
             const template = PROJECT_TEMPLATES[templateChoice];
             saveConfig({ 
               selectedFiles: template.defaultFiles,
               projectTemplate: templateChoice
             });
-            console.log(`\n✅ Template "${template.name}" selected!`);
-            console.log(`   ${template.defaultFiles.length} files will be generated\n`);
+            console.log(chalk.green(`\n✅ Template "${chalk.bold(template.name)}" selected!`));
+            console.log(chalk.gray(`   ${template.defaultFiles.length} files will be generated\n`));
           }
           break;
           
@@ -1142,8 +1205,23 @@ async function main() {
           }
           break;
 
+        case '/copy':
+          // Copy last AI response to clipboard
+          const lastMessage = session.messages.filter(m => m.role === 'assistant').pop();
+          if (lastMessage) {
+            try {
+              clipboardy.writeSync(lastMessage.content);
+              console.log(chalk.green('\n✅ Copied last response to clipboard!') + chalk.gray(` (${lastMessage.content.length} chars)\n`));
+            } catch (error) {
+              console.log(chalk.red('\n❌ Failed to copy to clipboard. ') + chalk.gray('Your terminal may not support clipboard access.\n'));
+            }
+          } else {
+            console.log(chalk.yellow('\n⚠️  No messages to copy.\n'));
+          }
+          break;
+
         default:
-          console.log(`Unknown command: ${command}. Type /help for help.\n`);
+          console.log(chalk.red(`\n❓ Unknown command:`) + chalk.yellow(` ${command}`) + chalk.gray('. Type /help for help.\n'));
       }
       
       continue;
@@ -1171,11 +1249,19 @@ async function main() {
       // Ask if user wants multi-step generation with validation
       if (trimmed.toLowerCase().includes('generate') && selectedFiles.length > 5) {
         const rl2 = createReadlineInterface();
-        const useAdvanced = await question(rl2, '\n🚀 Use advanced multi-step generation with validation? (y/n): ');
+        const useAdvanced = await question(rl2, chalk.bold.cyan('\n🚀 Use advanced multi-step generation with validation?') + chalk.gray(' (y/n): '));
         rl2.close();
         
         if (useAdvanced.toLowerCase() === 'y') {
-          console.log('\n🔄 Starting advanced plan generation...\n');
+          const spinner = ora({
+            text: chalk.cyan('Starting advanced plan generation...'),
+            spinner: 'dots'
+          }).start();
+          
+          setTimeout(() => {
+            spinner.stop();
+            console.log('\n');
+          }, 500);
           
           const { generatedFiles, stepResults, issues } = await generatePlanInSteps(
             messages, 
@@ -1188,7 +1274,7 @@ async function main() {
           
           // Score quality
           const qualityScore = scorePlanQuality(generatedFiles);
-          console.log(`\n📊 Plan Quality Score: ${qualityScore.totalScore}/${qualityScore.maxScore} (Grade: ${qualityScore.grade})`);
+          console.log(chalk.bold('\n📊 Plan Quality Score:') + chalk.cyan(` ${qualityScore.totalScore}/${qualityScore.maxScore}`) + chalk.gray(` (Grade: ${qualityScore.grade})`));
           
           // Learn from this project
           learnFromProject(session, generatedFiles);
@@ -1197,8 +1283,8 @@ async function main() {
           session.planVersion = version;
           saveSession(session);
           
-          console.log(`\n✅ Plan generated successfully!`);
-          console.log(`   Location: ${getPlanFolderPath(session.projectPath)}/v${version}/\n`);
+          console.log(chalk.green('\n✅ Plan generated successfully!'));
+          console.log(chalk.gray(`   Location: ${getPlanFolderPath(session.projectPath)}/v${version}/\n`));
           continue;
         }
       }
